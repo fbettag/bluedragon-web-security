@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlueDragon History</title>
+  <link rel="stylesheet" href="../popup.css">
+  <style>
+    body {
+      padding: var(--spacing-lg);
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .history-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--spacing-lg);
+      padding-bottom: var(--spacing-md);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .history-header-left {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+    }
+
+    .history-header img {
+      width: 48px;
+      height: 48px;
+    }
+
+    .history-header h1 {
+      font-size: var(--font-size-2xl);
+      margin: 0;
+      background: linear-gradient(135deg, var(--title-primary), var(--title-secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .stats-bar {
+      display: flex;
+      gap: var(--spacing-lg);
+      margin-bottom: var(--spacing-lg);
+      padding: var(--spacing-md);
+      background: var(--bg-secondary);
+      border-radius: var(--radius-lg);
+    }
+
+    .stat-box {
+      text-align: center;
+      padding: var(--spacing-sm) var(--spacing-lg);
+      border-right: 1px solid var(--border-color);
+    }
+
+    .stat-box:last-child {
+      border-right: none;
+    }
+
+    .stat-box .value {
+      font-size: var(--font-size-2xl);
+      font-weight: 700;
+    }
+
+    .stat-box .label {
+      font-size: var(--font-size-xs);
+      color: var(--accent-tertiary);
+      text-transform: uppercase;
+    }
+
+    .stat-box.critical .value { color: var(--severity-critical); }
+    .stat-box.high .value { color: var(--severity-high); }
+    .stat-box.medium .value { color: var(--severity-medium); }
+    .stat-box.low .value { color: var(--severity-low); }
+
+    .filters-bar {
+      display: flex;
+      gap: var(--spacing-md);
+      margin-bottom: var(--spacing-lg);
+      flex-wrap: wrap;
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+    }
+
+    .filter-group label {
+      font-size: var(--font-size-sm);
+      color: var(--accent-tertiary);
+    }
+
+    .filter-group select,
+    .filter-group input {
+      min-width: 150px;
+    }
+
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .history-table th {
+      text-align: left;
+      padding: var(--spacing-sm) var(--spacing-md);
+      background: var(--bg-secondary);
+      font-size: var(--font-size-xs);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent-tertiary);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .history-table td {
+      padding: var(--spacing-sm) var(--spacing-md);
+      border-bottom: 1px solid var(--bg-tertiary);
+      font-size: var(--font-size-sm);
+    }
+
+    .history-table tr:hover {
+      background: var(--bg-tertiary);
+    }
+
+    .history-table .severity-cell {
+      width: 100px;
+    }
+
+    .history-table .type-cell {
+      width: 120px;
+    }
+
+    .history-table .name-cell {
+      max-width: 250px;
+    }
+
+    .history-table .url-cell {
+      max-width: 300px;
+      font-family: var(--font-mono);
+      font-size: var(--font-size-xs);
+    }
+
+    .history-table .date-cell {
+      width: 150px;
+      font-size: var(--font-size-xs);
+      color: var(--accent-tertiary);
+    }
+
+    .history-table .actions-cell {
+      width: 100px;
+      text-align: right;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem 2rem;
+      color: var(--accent-muted);
+    }
+
+    .empty-state svg {
+      margin-bottom: var(--spacing-md);
+    }
+
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: var(--spacing-sm);
+      margin-top: var(--spacing-lg);
+    }
+
+    .pagination button {
+      min-width: 40px;
+    }
+
+    .pagination .page-info {
+      color: var(--accent-tertiary);
+      font-size: var(--font-size-sm);
+    }
+
+    .select-all-bar {
+      display: none;
+      justify-content: space-between;
+      align-items: center;
+      padding: var(--spacing-sm) var(--spacing-md);
+      background: var(--bg-tertiary);
+      border-radius: var(--radius-md);
+      margin-bottom: var(--spacing-md);
+    }
+
+    .select-all-bar.visible {
+      display: flex;
+    }
+  </style>
+</head>
+<body>
+  <header class="history-header">
+    <div class="history-header-left">
+      <img src="../icons/icon48.png" alt="BlueDragon">
+      <div>
+        <h1>Scan History</h1>
+        <span class="text-muted">All discovered vulnerabilities</span>
+      </div>
+    </div>
+    <div class="history-header-right">
+      <div class="dropdown" id="exportDropdown">
+        <button class="btn btn-secondary" id="exportBtn">
+          Export
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <div class="dropdown-menu">
+          <div class="dropdown-item" data-format="json">Export as JSON</div>
+          <div class="dropdown-item" data-format="nuclei">Export Nuclei Templates</div>
+          <div class="dropdown-item" data-format="markdown">Export Markdown Report</div>
+        </div>
+      </div>
+      <button class="btn btn-ghost" id="clearAllBtn">Clear All</button>
+    </div>
+  </header>
+
+  <div class="stats-bar">
+    <div class="stat-box">
+      <div class="value" id="totalCount">0</div>
+      <div class="label">Total</div>
+    </div>
+    <div class="stat-box critical">
+      <div class="value" id="criticalCount">0</div>
+      <div class="label">Critical</div>
+    </div>
+    <div class="stat-box high">
+      <div class="value" id="highCount">0</div>
+      <div class="label">High</div>
+    </div>
+    <div class="stat-box medium">
+      <div class="value" id="mediumCount">0</div>
+      <div class="label">Medium</div>
+    </div>
+    <div class="stat-box low">
+      <div class="value" id="lowCount">0</div>
+      <div class="label">Low</div>
+    </div>
+    <div class="stat-box">
+      <div class="value" id="unviewedCount">0</div>
+      <div class="label">Unviewed</div>
+    </div>
+  </div>
+
+  <div class="filters-bar">
+    <div class="filter-group">
+      <label>Severity:</label>
+      <select id="severityFilter">
+        <option value="">All</option>
+        <option value="CRITICAL">Critical</option>
+        <option value="HIGH">High</option>
+        <option value="MEDIUM">Medium</option>
+        <option value="LOW">Low</option>
+        <option value="INFO">Info</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Type:</label>
+      <select id="typeFilter">
+        <option value="">All</option>
+        <option value="RCE">RCE</option>
+        <option value="SSRF">SSRF</option>
+        <option value="XSS">XSS</option>
+        <option value="CSRF">CSRF</option>
+        <option value="Race Condition">Race Condition</option>
+        <option value="Prototype Pollution">Prototype Pollution</option>
+        <option value="Header">Headers</option>
+        <option value="Configuration">Configuration</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Framework:</label>
+      <select id="frameworkFilter">
+        <option value="">All</option>
+        <option value="Next.js">Next.js</option>
+        <option value="React">React</option>
+        <option value="Angular">Angular</option>
+        <option value="SvelteKit">SvelteKit</option>
+        <option value="Nuxt">Nuxt</option>
+        <option value="Vue.js">Vue.js</option>
+        <option value="Vuetify">Vuetify</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Search:</label>
+      <input type="text" id="searchInput" placeholder="CVE, URL, name...">
+    </div>
+  </div>
+
+  <div class="select-all-bar" id="selectBar">
+    <span><span id="selectedCount">0</span> items selected</span>
+    <div>
+      <button class="btn btn-sm btn-secondary" id="exportSelectedBtn">Export Selected</button>
+      <button class="btn btn-sm btn-ghost" id="deleteSelectedBtn">Delete Selected</button>
+    </div>
+  </div>
+
+  <table class="history-table">
+    <thead>
+      <tr>
+        <th style="width: 40px;">
+          <input type="checkbox" id="selectAll">
+        </th>
+        <th class="severity-cell">Severity</th>
+        <th class="type-cell">Type</th>
+        <th class="name-cell">Name</th>
+        <th class="url-cell">URL</th>
+        <th>Framework</th>
+        <th class="date-cell">Date</th>
+        <th class="actions-cell">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="historyBody">
+      <!-- Populated by JS -->
+    </tbody>
+  </table>
+
+  <div class="empty-state hidden" id="emptyState">
+    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+    </svg>
+    <h3>No vulnerabilities found</h3>
+    <p>Start scanning pages to discover vulnerabilities</p>
+  </div>
+
+  <div class="pagination" id="pagination">
+    <button class="btn btn-sm btn-secondary" id="prevPage">Previous</button>
+    <span class="page-info">Page <span id="currentPage">1</span> of <span id="totalPages">1</span></span>
+    <button class="btn btn-sm btn-secondary" id="nextPage">Next</button>
+  </div>
+
+  <script src="history.js" type="module"></script>
+</body>
+</html>
