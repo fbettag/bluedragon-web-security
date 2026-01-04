@@ -144,7 +144,7 @@ function setupEventListeners() {
     if (e.target === elements.vulnModal) closeModal();
   });
   elements.modalCopyBtn.addEventListener('click', copyVulnDetails);
-  elements.modalExploitBtn.addEventListener('click', toggleExploitSection);
+  elements.modalExploitBtn.addEventListener('click', showExploitSection);
 
   // Exploit section
   elements.runExploitBtn.addEventListener('click', runExploit);
@@ -489,7 +489,7 @@ function createVulnItem(result) {
   if (testBtn) {
     testBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      showVulnModal(result, true);
+      showExploitModal(result);
     });
   }
 
@@ -497,9 +497,58 @@ function createVulnItem(result) {
 }
 
 /**
+ * Show exploit testing modal (minimal view, straight to exploit form)
+ */
+function showExploitModal(result) {
+  const vulnType = getVulnType(result);
+  if (!vulnType) {
+    showToast('Exploit test not available for this vulnerability type', 'info');
+    return;
+  }
+
+  elements.modalTitle.textContent = `Test: ${result.name || result.type}`;
+
+  // Minimal body with just target info
+  elements.modalBody.innerHTML = `
+    <div class="vuln-detail-section">
+      <h4>Target</h4>
+      <p><code class="truncate">${escapeHtml(result.url || 'N/A')}</code></p>
+    </div>
+    ${result.cve ? `
+    <div class="vuln-detail-section">
+      <h4>CVE</h4>
+      <p><code>${result.cve}</code> <span class="badge badge-${result.severity?.toLowerCase() || 'info'}">${result.severity || 'INFO'}</span></p>
+    </div>
+    ` : ''}
+  `;
+
+  // Store current result for actions
+  elements.vulnModal.dataset.resultId = result.id;
+
+  // Hide the "Test Exploit" button since we're already in exploit mode
+  elements.modalExploitBtn.classList.add('hidden');
+
+  // Show modal
+  elements.vulnModal.classList.add('open');
+
+  // Directly show exploit section
+  elements.exploitSection.dataset.vulnType = vulnType;
+  elements.exploitSection.classList.remove('hidden');
+
+  // Set default command
+  const defaultCmd = getDefaultCommand(vulnType);
+  if (defaultCmd && !elements.exploitCommand.value) {
+    elements.exploitCommand.value = defaultCmd;
+  }
+
+  // Focus input
+  setTimeout(() => elements.exploitCommand.focus(), 100);
+}
+
+/**
  * Show vulnerability detail modal
  */
-function showVulnModal(result, showExploit = false) {
+function showVulnModal(result) {
   elements.modalTitle.textContent = result.name || result.type;
 
   elements.modalBody.innerHTML = `
@@ -578,7 +627,7 @@ function closeModal() {
   elements.exploitOutput.innerHTML = '<div class="exploit-output-placeholder">Output will appear here...</div>';
   elements.exploitStatus.textContent = '';
   elements.exploitStatus.className = 'exploit-status';
-  elements.modalExploitBtn.textContent = 'Test Exploit';
+  elements.modalExploitBtn.classList.remove('hidden');
 }
 
 /**
@@ -647,9 +696,9 @@ function getDefaultCommand(vulnType) {
 }
 
 /**
- * Toggle the exploit section visibility
+ * Show the exploit section
  */
-function toggleExploitSection() {
+function showExploitSection() {
   const resultId = elements.vulnModal.dataset.resultId;
   const result = scanResults.find(r => r.id === resultId);
 
@@ -664,25 +713,18 @@ function toggleExploitSection() {
   // Store vuln type for later use
   elements.exploitSection.dataset.vulnType = vulnType;
 
-  // Toggle visibility
-  const isHidden = elements.exploitSection.classList.contains('hidden');
+  // Show exploit section
+  elements.exploitSection.classList.remove('hidden');
+  elements.modalExploitBtn.classList.add('hidden');
 
-  if (isHidden) {
-    elements.exploitSection.classList.remove('hidden');
-    elements.modalExploitBtn.textContent = 'Hide Exploit';
-
-    // Set default command
-    const defaultCmd = getDefaultCommand(vulnType);
-    if (defaultCmd && !elements.exploitCommand.value) {
-      elements.exploitCommand.value = defaultCmd;
-    }
-
-    // Focus input
-    elements.exploitCommand.focus();
-  } else {
-    elements.exploitSection.classList.add('hidden');
-    elements.modalExploitBtn.textContent = 'Test Exploit';
+  // Set default command
+  const defaultCmd = getDefaultCommand(vulnType);
+  if (defaultCmd && !elements.exploitCommand.value) {
+    elements.exploitCommand.value = defaultCmd;
   }
+
+  // Focus input
+  elements.exploitCommand.focus();
 }
 
 /**
