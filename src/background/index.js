@@ -22,6 +22,9 @@ let collaboratorResults = [];
 // Rate limiter for probes
 const globalRateLimiter = new RateLimiter(5);
 
+// Header rule ID for exploit testing
+const HEADER_RULE_ID = 1;
+
 /**
  * Initialize background worker
  */
@@ -187,6 +190,18 @@ function handleMessage(message, sender, sendResponse) {
         .catch(error => sendResponse({ success: false, error: error.message }));
       return true;
 
+    case MESSAGE_TYPES.ENABLE_HEADER_RULES:
+      enableHeaderRules(message.domain)
+        .then(result => sendResponse(result))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+      return true;
+
+    case MESSAGE_TYPES.DISABLE_HEADER_RULES:
+      disableHeaderRules()
+        .then(result => sendResponse(result))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+      return true;
+
     default:
       console.warn('[BlueDragon] Unknown message type:', message.type);
       sendResponse({ success: false, error: 'Unknown message type' });
@@ -227,27 +242,46 @@ async function handleScanComplete(tabId, data) {
     await saveHistory();
   }
 
-  // Send notifications
-  if (settings.notificationsEnabled && data.results?.length > 0) {
-    const critical = data.results.filter(r => r.severity === SEVERITY.CRITICAL);
-    const high = data.results.filter(r => r.severity === SEVERITY.HIGH);
+  // Get critical and high severity findings
+  const critical = data.results?.filter(r => r.severity === SEVERITY.CRITICAL) || [];
+  const high = data.results?.filter(r => r.severity === SEVERITY.HIGH) || [];
+  const hasHighSeverity = critical.length > 0 || high.length > 0;
 
-    if (critical.length > 0 || high.length > 0) {
-      sendNotification(
-        'Vulnerabilities Found',
-        `${critical.length} critical, ${high.length} high severity issues on ${new URL(data.url).hostname}`
-      );
-    }
+  // Always send browser notifications for high severity in auto mode
+  // or if notifications are enabled
+  const isAutoMode = settings.autoScanEnabled || settings.scanMode === 'active';
+
+  if (hasHighSeverity && (isAutoMode || settings.notificationsEnabled)) {
+    const hostname = new URL(data.url).hostname;
+
+    // Update badge to show alert
+    chrome.action.setBadgeBackgroundColor({
+      tabId,
+      color: critical.length > 0 ? '#dc2626' : '#f97316'
+    });
+    chrome.action.setBadgeText({
+      tabId,
+      text: String(critical.length + high.length)
+    });
+
+    // Send browser notification
+    const title = critical.length > 0
+      ? `CRITICAL: ${critical[0].name}`
+      : `HIGH: ${high[0].name}`;
+
+    const message = critical.length > 0
+      ? `${critical.length} critical${high.length > 0 ? `, ${high.length} high` : ''} severity on ${hostname}`
+      : `${high.length} high severity issue${high.length > 1 ? 's' : ''} on ${hostname}`;
+
+    sendNotification(title, message, {
+      requireInteraction: critical.length > 0, // Keep critical notifications visible
+      priority: critical.length > 0 ? 2 : 1
+    });
   }
 
   // Send Discord webhook
-  if (settings.discordWebhookEnabled && settings.discordWebhookUrl) {
-    const criticalResults = data.results.filter(r =>
-      r.severity === SEVERITY.CRITICAL || r.severity === SEVERITY.HIGH
-    );
-    if (criticalResults.length > 0) {
-      sendDiscordWebhook(data.url, criticalResults);
-    }
+  if (settings.discordWebhookEnabled && settings.discordWebhookUrl && hasHighSeverity) {
+    sendDiscordWebhook(data.url, [...critical, ...high]);
   }
 
   // Update scan state
@@ -564,14 +598,27 @@ function analyzeResponseHeaders(details) {
 
 /**
  * Send browser notification
+ * @param {string} title - Notification title
+ * @param {string} message - Notification message
+ * @param {Object} options - Additional options
  */
-function sendNotification(title, message) {
-  chrome.notifications.create({
+function sendNotification(title, message, options = {}) {
+  const notificationOptions = {
     type: 'basic',
     iconUrl: 'icons/icon128.png',
     title: `BlueDragon: ${title}`,
     message,
-    priority: 2
+    priority: options.priority || 2,
+    requireInteraction: options.requireInteraction || false
+  };
+
+  chrome.notifications.create(notificationOptions, (notificationId) => {
+    // Auto-dismiss non-critical notifications after 10 seconds
+    if (!options.requireInteraction) {
+      setTimeout(() => {
+        chrome.notifications.clear(notificationId);
+      }, 10000);
+    }
   });
 }
 
@@ -674,6 +721,70 @@ async function checkCollaboratorCallbacks() {
   // Implementation for checking OOB callbacks
   // This would poll Interactsh or custom webhook for results
 }
+
+/**
+ * Enable header modification rules for exploit testing
+ * Removes Origin header to bypass CORS restrictions
+ * @param {string} domain - Domain to apply rules to
+ */
+async function enableHeaderRules(domain) {
+  try {
+    // Remove any existing rule first
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [HEADER_RULE_ID]
+    });
+
+    // Add rule scoped to specific domain
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      addRules: [{
+        id: HEADER_RULE_ID,
+        priority: 1,
+        action: {
+          type: 'modifyHeaders',
+          requestHeaders: [
+            { header: 'Origin', operation: 'remove' }
+          ]
+        },
+        condition: {
+          urlFilter: `*://${domain}/*`,
+          resourceTypes: ['xmlhttprequest']
+        }
+      }]
+    });
+
+    console.log('[BlueDragon] Header rules enabled for:', domain);
+    return { success: true };
+  } catch (e) {
+    console.error('[BlueDragon] Failed to enable header rules:', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Disable header modification rules
+ */
+async function disableHeaderRules() {
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [HEADER_RULE_ID]
+    });
+
+    console.log('[BlueDragon] Header rules disabled');
+    return { success: true };
+  } catch (e) {
+    console.error('[BlueDragon] Failed to disable header rules:', e);
+    return { success: false, error: e.message };
+  }
+}
+
+// Clear header rules on startup and install
+chrome.runtime.onStartup.addListener(() => {
+  disableHeaderRules();
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  disableHeaderRules();
+});
 
 // Initialize
 init();

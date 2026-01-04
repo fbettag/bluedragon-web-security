@@ -377,6 +377,222 @@
   border-color: var(--severity-critical);
 }
 
+/* Large Modal */
+.modal.modal-large {
+  width: 560px;
+  max-height: 80vh;
+}
+
+/* Exploit Section */
+.exploit-section {
+  padding: var(--spacing-md);
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.exploit-section.hidden {
+  display: none;
+}
+
+.exploit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-md);
+}
+
+.exploit-header h4 {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--fire-primary);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.exploit-header h4::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--fire-primary);
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.exploit-warning {
+  font-size: var(--font-size-xs);
+  color: var(--severity-high);
+  background: rgba(249, 115, 22, 0.1);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+.exploit-input-group {
+  margin-bottom: var(--spacing-md);
+}
+
+.exploit-input-group label {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--accent-tertiary);
+  margin-bottom: var(--spacing-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.exploit-input-row {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.exploit-input {
+  flex: 1;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--accent-primary);
+}
+
+.exploit-input:focus {
+  outline: none;
+  border-color: var(--fire-primary);
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2);
+}
+
+.exploit-input::placeholder {
+  color: var(--accent-muted);
+}
+
+.exploit-output-group {
+  margin-bottom: var(--spacing-sm);
+}
+
+.exploit-output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-xs);
+}
+
+.exploit-output-header label {
+  font-size: var(--font-size-xs);
+  color: var(--accent-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.exploit-output-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.btn-xs {
+  padding: 2px 6px;
+  font-size: 10px;
+}
+
+.exploit-output {
+  background: #0d1117;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-md);
+  min-height: 120px;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  color: #58a6ff;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.exploit-output-placeholder {
+  color: var(--accent-muted);
+  font-style: italic;
+}
+
+.exploit-output .output-line {
+  display: block;
+  padding: 2px 0;
+}
+
+.exploit-output .output-line.command {
+  color: #7ee787;
+}
+
+.exploit-output .output-line.command::before {
+  content: '$ ';
+  color: #f97316;
+}
+
+.exploit-output .output-line.result {
+  color: #58a6ff;
+}
+
+.exploit-output .output-line.error {
+  color: #f85149;
+}
+
+.exploit-output .output-line.success {
+  color: #7ee787;
+}
+
+.exploit-output .output-line.info {
+  color: #8b949e;
+}
+
+.exploit-output .output-timestamp {
+  color: #6e7681;
+  font-size: 9px;
+  margin-right: var(--spacing-sm);
+}
+
+.exploit-status {
+  font-size: var(--font-size-xs);
+  padding: var(--spacing-xs) 0;
+  min-height: 20px;
+}
+
+.exploit-status.running {
+  color: var(--fire-primary);
+}
+
+.exploit-status.success {
+  color: var(--severity-low);
+}
+
+.exploit-status.error {
+  color: var(--severity-critical);
+}
+
+/* Loading spinner for run button */
+#runExploitBtn.loading {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+#runExploitBtn.loading svg {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* Responsive adjustments */
 @media (max-height: 500px) {
   .popup-container {

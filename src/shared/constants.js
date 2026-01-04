@@ -374,6 +374,26 @@ export const CVE_DATABASE = {
     frameworks: [FRAMEWORKS.VUE],
     description: 'mergeDeep function allows prototype pollution',
     scanner: 'prototype-pollution'
+  },
+  'CVE-2025-3248': {
+    name: 'Langflow Remote Code Execution',
+    type: VULN_TYPES.RCE,
+    severity: SEVERITY.CRITICAL,
+    cvss: 9.8,
+    frameworks: [],
+    description: 'Unauthenticated RCE via /api/v1/validate/code endpoint using exec()',
+    affectedVersions: ['1.0.0-1.2.x'],
+    scanner: 'langflow-rce'
+  },
+  'CVE-2025-34291': {
+    name: 'Langflow CORS/CSRF Chain RCE',
+    type: VULN_TYPES.RCE,
+    severity: SEVERITY.CRITICAL,
+    cvss: 9.4,
+    frameworks: [],
+    description: 'Account takeover and RCE via CORS misconfiguration and CSRF bypass on token refresh endpoint',
+    affectedVersions: ['1.0.0-1.6.9'],
+    scanner: 'langflow-cors-rce'
   }
 };
 
@@ -456,6 +476,11 @@ export const MESSAGE_TYPES = {
   EXPORT_REQUEST: 'DRAGON_EXPORT_REQUEST',
   GET_HISTORY: 'DRAGON_GET_HISTORY',
   CLEAR_HISTORY: 'DRAGON_CLEAR_HISTORY',
+
+  // Exploit testing
+  TEST_EXPLOIT: 'DRAGON_TEST_EXPLOIT',
+  ENABLE_HEADER_RULES: 'DRAGON_ENABLE_HEADER_RULES',
+  DISABLE_HEADER_RULES: 'DRAGON_DISABLE_HEADER_RULES',
 
   // Injected -> Content
   NETWORK_CAPTURE: 'DRAGON_NETWORK_CAPTURE',

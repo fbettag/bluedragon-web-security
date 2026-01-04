@@ -74,7 +74,9 @@ const GENERIC_SCANNERS = [
   { name: 'security-headers', scanner: genericScanners.securityHeadersScanner, priority: 10 },
   { name: 'csrf', scanner: genericScanners.csrfScanner, priority: 11 },
   { name: 'ssrf', scanner: genericScanners.ssrfScanner, priority: 12 },
-  { name: 'header-injection', scanner: genericScanners.headerInjectionScanner, priority: 13 }
+  { name: 'header-injection', scanner: genericScanners.headerInjectionScanner, priority: 13 },
+  { name: 'langflow-rce', scanner: genericScanners.langflowRCEScanner, priority: 14 },
+  { name: 'langflow-cors-rce', scanner: genericScanners.langflowCORSScanner, priority: 15 }
 ];
 
 /**

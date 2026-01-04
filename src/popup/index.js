@@ -88,6 +88,15 @@ function cacheElements() {
     modalCopyBtn: document.getElementById('modalCopyBtn'),
     modalExploitBtn: document.getElementById('modalExploitBtn'),
 
+    // Exploit Section
+    exploitSection: document.getElementById('exploitSection'),
+    exploitCommand: document.getElementById('exploitCommand'),
+    runExploitBtn: document.getElementById('runExploitBtn'),
+    exploitOutput: document.getElementById('exploitOutput'),
+    copyOutputBtn: document.getElementById('copyOutputBtn'),
+    clearOutputBtn: document.getElementById('clearOutputBtn'),
+    exploitStatus: document.getElementById('exploitStatus'),
+
     // Container
     app: document.getElementById('app')
   };
@@ -135,7 +144,15 @@ function setupEventListeners() {
     if (e.target === elements.vulnModal) closeModal();
   });
   elements.modalCopyBtn.addEventListener('click', copyVulnDetails);
-  elements.modalExploitBtn.addEventListener('click', testExploit);
+  elements.modalExploitBtn.addEventListener('click', toggleExploitSection);
+
+  // Exploit section
+  elements.runExploitBtn.addEventListener('click', runExploit);
+  elements.copyOutputBtn.addEventListener('click', copyExploitOutput);
+  elements.clearOutputBtn.addEventListener('click', clearExploitOutput);
+  elements.exploitCommand.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') runExploit();
+  });
 
   // Close dropdown when clicking outside
   document.addEventListener('click', (e) => {
@@ -554,6 +571,14 @@ function showVulnModal(result, showExploit = false) {
  */
 function closeModal() {
   elements.vulnModal.classList.remove('open');
+
+  // Reset exploit section
+  elements.exploitSection.classList.add('hidden');
+  elements.exploitCommand.value = '';
+  elements.exploitOutput.innerHTML = '<div class="exploit-output-placeholder">Output will appear here...</div>';
+  elements.exploitStatus.textContent = '';
+  elements.exploitStatus.className = 'exploit-status';
+  elements.modalExploitBtn.textContent = 'Test Exploit';
 }
 
 /**
@@ -585,16 +610,227 @@ ${result.testVector ? `Test Vector: ${result.testVector}` : ''}
 }
 
 /**
- * Test exploit (placeholder)
+ * Get the vulnerability type for exploit testing
  */
-async function testExploit() {
+function getVulnType(result) {
+  if (result.cve === 'CVE-2025-55182' || result.name?.includes('React2Shell')) {
+    return 'react2shell';
+  } else if (result.cve === 'CVE-2025-29927' || result.name?.includes('Middleware')) {
+    return 'middleware-bypass';
+  } else if (result.cve === 'CVE-2024-34351' || result.name?.includes('Server Action SSRF')) {
+    return 'server-action-ssrf';
+  } else if (result.cve === 'CVE-2025-3248' || (result.name?.includes('Langflow') && result.name?.includes('Unauthenticated'))) {
+    return 'langflow-rce';
+  } else if (result.cve === 'CVE-2025-34291' || result.name?.includes('Langflow CORS')) {
+    return 'langflow-cors-rce';
+  }
+  return null;
+}
+
+/**
+ * Get default command for vulnerability type
+ */
+function getDefaultCommand(vulnType) {
+  switch (vulnType) {
+    case 'react2shell':
+    case 'langflow-rce':
+      return 'id && whoami && hostname';
+    case 'middleware-bypass':
+      return ''; // No command needed
+    case 'server-action-ssrf':
+      return ''; // No command needed
+    case 'langflow-cors-rce':
+      return ''; // No command needed
+    default:
+      return 'echo test';
+  }
+}
+
+/**
+ * Toggle the exploit section visibility
+ */
+function toggleExploitSection() {
   const resultId = elements.vulnModal.dataset.resultId;
   const result = scanResults.find(r => r.id === resultId);
 
   if (!result) return;
 
-  showToast('Exploit testing not yet implemented', 'info');
-  // TODO: Implement exploit testing via background/content script
+  const vulnType = getVulnType(result);
+  if (!vulnType) {
+    showToast('Exploit test not available for this vulnerability type', 'info');
+    return;
+  }
+
+  // Store vuln type for later use
+  elements.exploitSection.dataset.vulnType = vulnType;
+
+  // Toggle visibility
+  const isHidden = elements.exploitSection.classList.contains('hidden');
+
+  if (isHidden) {
+    elements.exploitSection.classList.remove('hidden');
+    elements.modalExploitBtn.textContent = 'Hide Exploit';
+
+    // Set default command
+    const defaultCmd = getDefaultCommand(vulnType);
+    if (defaultCmd && !elements.exploitCommand.value) {
+      elements.exploitCommand.value = defaultCmd;
+    }
+
+    // Focus input
+    elements.exploitCommand.focus();
+  } else {
+    elements.exploitSection.classList.add('hidden');
+    elements.modalExploitBtn.textContent = 'Test Exploit';
+  }
+}
+
+/**
+ * Add line to exploit output
+ */
+function addOutputLine(text, type = 'result') {
+  // Clear placeholder if present
+  const placeholder = elements.exploitOutput.querySelector('.exploit-output-placeholder');
+  if (placeholder) {
+    placeholder.remove();
+  }
+
+  const timestamp = new Date().toLocaleTimeString();
+  const line = document.createElement('span');
+  line.className = `output-line ${type}`;
+
+  if (type === 'command') {
+    line.innerHTML = `<span class="output-timestamp">[${timestamp}]</span>${escapeHtml(text)}`;
+  } else {
+    line.textContent = text;
+  }
+
+  elements.exploitOutput.appendChild(line);
+  elements.exploitOutput.scrollTop = elements.exploitOutput.scrollHeight;
+}
+
+/**
+ * Set exploit status message
+ */
+function setExploitStatus(message, type = '') {
+  elements.exploitStatus.textContent = message;
+  elements.exploitStatus.className = `exploit-status ${type}`;
+}
+
+/**
+ * Run the exploit with the current command
+ */
+async function runExploit() {
+  const resultId = elements.vulnModal.dataset.resultId;
+  const result = scanResults.find(r => r.id === resultId);
+  const vulnType = elements.exploitSection.dataset.vulnType;
+  const command = elements.exploitCommand.value.trim();
+
+  if (!result || !vulnType) {
+    showToast('No vulnerability selected', 'error');
+    return;
+  }
+
+  // Disable button and show loading
+  elements.runExploitBtn.classList.add('loading');
+  elements.runExploitBtn.disabled = true;
+  setExploitStatus('Running exploit...', 'running');
+
+  // Add command to output
+  if (command) {
+    addOutputLine(command, 'command');
+  } else {
+    addOutputLine('Running exploit probe...', 'info');
+  }
+
+  try {
+    const response = await chrome.tabs.sendMessage(currentTab.id, {
+      type: MESSAGE_TYPES.TEST_EXPLOIT,
+      vulnType,
+      options: {
+        path: result.url ? new URL(result.url).pathname : '/',
+        command: command || 'echo BlueDragon_Test_$(date +%s)',
+        endpoint: result.url
+      }
+    });
+
+    if (response.success && response.result) {
+      const testResult = response.result;
+
+      if (testResult.vulnerable === true) {
+        setExploitStatus('VULNERABLE - RCE Confirmed!', 'success');
+        addOutputLine('', 'result');
+        addOutputLine('=== OUTPUT ===', 'success');
+
+        // Display output line by line
+        const output = testResult.output || 'Command executed (no output)';
+        output.split('\n').forEach(line => {
+          addOutputLine(line, 'result');
+        });
+
+        addOutputLine('', 'result');
+        addOutputLine(`[+] ${testResult.message}`, 'success');
+
+        // Update the result
+        result.confirmed = true;
+        result.exploitOutput = output;
+
+      } else if (testResult.vulnerable === 'possible') {
+        setExploitStatus('Possibly vulnerable', 'running');
+        addOutputLine(`[?] ${testResult.message}`, 'info');
+        if (testResult.note) {
+          addOutputLine(`    ${testResult.note}`, 'info');
+        }
+
+      } else {
+        setExploitStatus('Not vulnerable or not exploitable', 'error');
+        addOutputLine(`[-] ${testResult.message}`, 'error');
+        if (testResult.suggestion) {
+          addOutputLine(`    Suggestion: ${testResult.suggestion}`, 'info');
+        }
+      }
+
+      // Show debug info if available
+      if (testResult.debug) {
+        addOutputLine('', 'result');
+        addOutputLine('[DEBUG] ' + testResult.debug, 'info');
+      }
+
+    } else {
+      setExploitStatus('Exploit failed', 'error');
+      addOutputLine(`[!] Error: ${response.error || 'Unknown error'}`, 'error');
+    }
+
+  } catch (e) {
+    console.error('[BlueDragon] Exploit error:', e);
+    setExploitStatus('Error running exploit', 'error');
+    addOutputLine(`[!] Exception: ${e.message}`, 'error');
+  } finally {
+    elements.runExploitBtn.classList.remove('loading');
+    elements.runExploitBtn.disabled = false;
+  }
+}
+
+/**
+ * Copy exploit output to clipboard
+ */
+async function copyExploitOutput() {
+  const output = elements.exploitOutput.innerText;
+
+  try {
+    await navigator.clipboard.writeText(output);
+    showToast('Output copied!', 'success');
+  } catch (e) {
+    showToast('Failed to copy', 'error');
+  }
+}
+
+/**
+ * Clear exploit output
+ */
+function clearExploitOutput() {
+  elements.exploitOutput.innerHTML = '<div class="exploit-output-placeholder">Output will appear here...</div>';
+  setExploitStatus('');
 }
 
 /**

@@ -147,7 +147,7 @@
 
   <!-- Vuln Detail Modal -->
   <div class="modal-backdrop" id="vulnModal">
-    <div class="modal">
+    <div class="modal modal-large">
       <div class="modal-header">
         <h3 id="modalTitle">Vulnerability Details</h3>
         <button class="btn btn-icon btn-ghost" id="closeModal">
@@ -160,6 +160,53 @@
       <div class="modal-body" id="modalBody">
         <!-- Filled by JS -->
       </div>
+
+      <!-- Exploit Testing Section -->
+      <div class="exploit-section hidden" id="exploitSection">
+        <div class="exploit-header">
+          <h4>Exploit Testing</h4>
+          <span class="exploit-warning">Use only on authorized targets</span>
+        </div>
+
+        <div class="exploit-input-group">
+          <label for="exploitCommand">Command:</label>
+          <div class="exploit-input-row">
+            <input type="text" id="exploitCommand" class="exploit-input" placeholder="echo test">
+            <button class="btn btn-fire btn-sm" id="runExploitBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              Run
+            </button>
+          </div>
+        </div>
+
+        <div class="exploit-output-group">
+          <div class="exploit-output-header">
+            <label>Output:</label>
+            <div class="exploit-output-actions">
+              <button class="btn btn-ghost btn-xs" id="copyOutputBtn" title="Copy output">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              </button>
+              <button class="btn btn-ghost btn-xs" id="clearOutputBtn" title="Clear output">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18"></path>
+                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="exploit-output" id="exploitOutput">
+            <div class="exploit-output-placeholder">Output will appear here...</div>
+          </div>
+        </div>
+
+        <div class="exploit-status" id="exploitStatus"></div>
+      </div>
+
       <div class="modal-footer">
         <button class="btn btn-secondary" id="modalCopyBtn">Copy Details</button>
         <button class="btn btn-fire" id="modalExploitBtn">Test Exploit</button>

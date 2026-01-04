@@ -337,9 +337,151 @@ export async function headerInjectionScanner(context) {
   return results;
 }
 
+/**
+ * Langflow RCE Scanner (CVE-2025-3248)
+ * Detects unauthenticated RCE via /api/v1/validate/code endpoint
+ */
+export async function langflowRCEScanner(context) {
+  const { url, settings } = context;
+  const results = [];
+
+  // Check if this might be a Langflow instance
+  const langflowEndpoint = new URL('/api/v1/validate/code', url).toString();
+
+  try {
+    // First, check if endpoint exists with a safe probe
+    const probeResponse = await fetch(langflowEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ code: 'def test(): pass' }),
+      signal: AbortSignal.timeout(5000)
+    });
+
+    // If we get a response (not 404), this might be Langflow
+    if (probeResponse.status !== 404) {
+      const isLangflow = probeResponse.status === 200 ||
+        probeResponse.status === 401 ||
+        probeResponse.status === 422;
+
+      if (isLangflow) {
+        // Check if unauthenticated (CVE-2025-3248 - affects <= 1.2.x)
+        if (probeResponse.status === 200) {
+          results.push({
+            type: 'RCE',
+            name: 'Langflow Unauthenticated RCE (CVE-2025-3248)',
+            severity: SEVERITY.CRITICAL,
+            cvss: 9.8,
+            cve: 'CVE-2025-3248',
+            description: 'Langflow /api/v1/validate/code endpoint accepts unauthenticated requests. Arbitrary code execution possible via exec().',
+            url: langflowEndpoint,
+            exploitable: true,
+            requiresProbe: true,
+            testVector: '{"code": "def run(cd=exec(\\\'raise Exception(__import__(\\"os\\").popen(\\"id\\").read())\\\')): pass"}',
+            remediation: 'Upgrade to Langflow 1.3.0+ which requires authentication for code validation'
+          });
+        }
+
+        // Also report if endpoint exists but requires auth (still might be vulnerable to CVE-2025-34291)
+        if (probeResponse.status === 401) {
+          results.push({
+            type: 'RCE',
+            name: 'Langflow Code Validation Endpoint',
+            severity: SEVERITY.HIGH,
+            description: 'Langflow /api/v1/validate/code endpoint detected with authentication. May be vulnerable to CVE-2025-34291 (CORS chain).',
+            url: langflowEndpoint,
+            requiresProbe: true,
+            note: 'Check CORS and cookie configuration for CVE-2025-34291'
+          });
+        }
+      }
+    }
+  } catch (e) {
+    // Endpoint not accessible
+  }
+
+  return results;
+}
+
+/**
+ * Langflow CORS/CSRF Chain Scanner (CVE-2025-34291)
+ * Detects CORS misconfiguration and CSRF bypass leading to account takeover + RCE
+ */
+export async function langflowCORSScanner(context) {
+  const { url, settings } = context;
+  const results = [];
+
+  // Check for Langflow refresh endpoint
+  const refreshEndpoint = new URL('/api/v1/refresh', url).toString();
+
+  try {
+    // Send cross-origin request with credentials to check CORS
+    const corsResponse = await fetch(refreshEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'https://evil.attacker.com'
+      },
+      credentials: 'include',
+      signal: AbortSignal.timeout(5000)
+    });
+
+    // Check if CORS allows the origin
+    const corsHeader = corsResponse.headers.get('access-control-allow-origin');
+    const credentialsHeader = corsResponse.headers.get('access-control-allow-credentials');
+
+    if (corsHeader && (corsHeader === '*' || corsHeader === 'https://evil.attacker.com')) {
+      const isCritical = credentialsHeader === 'true';
+
+      results.push({
+        type: 'RCE',
+        name: 'Langflow CORS/CSRF Chain (CVE-2025-34291)',
+        severity: isCritical ? SEVERITY.CRITICAL : SEVERITY.HIGH,
+        cvss: isCritical ? 9.4 : 7.5,
+        cve: 'CVE-2025-34291',
+        description: isCritical
+          ? 'Langflow allows cross-origin requests WITH credentials. Account takeover and RCE possible via CSRF chain.'
+          : 'Langflow has permissive CORS configuration. May be exploitable with additional vulnerabilities.',
+        url: refreshEndpoint,
+        corsConfig: {
+          allowOrigin: corsHeader,
+          allowCredentials: credentialsHeader
+        },
+        exploitable: isCritical,
+        requiresProbe: true,
+        testVector: 'Steal refresh_token_lf cookie via cross-site request, then use token to access /api/v1/validate/code',
+        remediation: 'Upgrade to Langflow 1.7+ and configure CORS_ORIGINS environment variable to restrict allowed origins'
+      });
+    }
+
+    // Also check for SameSite=None cookie configuration
+    const setCookieHeader = corsResponse.headers.get('set-cookie');
+    if (setCookieHeader && setCookieHeader.includes('SameSite=None')) {
+      if (!results.find(r => r.cve === 'CVE-2025-34291')) {
+        results.push({
+          type: 'CSRF',
+          name: 'Langflow Cookie Misconfiguration',
+          severity: SEVERITY.MEDIUM,
+          description: 'Langflow sets cookies with SameSite=None. Combined with CORS, this enables CSRF attacks.',
+          url,
+          cookieConfig: 'SameSite=None detected',
+          note: 'Check if CORS is also misconfigured for CVE-2025-34291'
+        });
+      }
+    }
+  } catch (e) {
+    // Endpoint not accessible
+  }
+
+  return results;
+}
+
 export default {
   securityHeadersScanner,
   csrfScanner,
   ssrfScanner,
-  headerInjectionScanner
+  headerInjectionScanner,
+  langflowRCEScanner,
+  langflowCORSScanner
 };
