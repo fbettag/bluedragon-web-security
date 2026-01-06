@@ -71,6 +71,7 @@ const SCANNER_MODULES = {
  * Generic scanners that run regardless of framework
  */
 const GENERIC_SCANNERS = [
+  { name: 'secrets', scanner: genericScanners.secretsScanner, priority: 1 },
   { name: 'security-headers', scanner: genericScanners.securityHeadersScanner, priority: 10 },
   { name: 'csrf', scanner: genericScanners.csrfScanner, priority: 11 },
   { name: 'ssrf', scanner: genericScanners.ssrfScanner, priority: 12 },

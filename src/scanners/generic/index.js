@@ -5,6 +5,7 @@
 
 import { SEVERITY } from '../../shared/constants.js';
 import { generateSafeId, isBlockedEndpoint } from '../../shared/safety-filters.js';
+import { secretsScanner } from './secrets-scanner.js';
 
 /**
  * Security Headers Scanner
@@ -477,11 +478,16 @@ export async function langflowCORSScanner(context) {
   return results;
 }
 
+export {
+  secretsScanner
+};
+
 export default {
   securityHeadersScanner,
   csrfScanner,
   ssrfScanner,
   headerInjectionScanner,
   langflowRCEScanner,
-  langflowCORSScanner
+  langflowCORSScanner,
+  secretsScanner
 };
