@@ -169,7 +169,12 @@
         </div>
 
         <div class="exploit-input-group">
-          <label for="exploitCommand">Command:</label>
+          <label for="exploitUrl">Target URL:</label>
+          <input type="text" id="exploitUrl" class="exploit-input" placeholder="https://example.com/api/endpoint">
+        </div>
+
+        <div class="exploit-input-group">
+          <label for="exploitCommand">Command/Payload:</label>
           <div class="exploit-input-row">
             <input type="text" id="exploitCommand" class="exploit-input" placeholder="echo test">
             <button class="btn btn-fire btn-sm" id="runExploitBtn">

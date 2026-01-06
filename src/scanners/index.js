@@ -23,7 +23,9 @@ const SCANNER_MODULES = {
     { name: 'server-action-ssrf', scanner: reactScanners.serverActionSSRFScanner, priority: 3 },
     { name: 'source-exposure', scanner: reactScanners.sourceCodeExposureScanner, priority: 4 },
     { name: 'react-dos', scanner: reactScanners.reactDoSScanner, priority: 5 },
-    { name: 'image-dos', scanner: reactScanners.imageDoSScanner, priority: 6 }
+    { name: 'image-dos', scanner: reactScanners.imageDoSScanner, priority: 6 },
+    { name: 'path-traversal', scanner: reactScanners.pathTraversalScanner, priority: 7 },
+    { name: 'prototype-pollution', scanner: reactScanners.serverActionPrototypePollutionScanner, priority: 8 }
   ],
   [FRAMEWORKS.REACT]: [
     { name: 'react2shell', scanner: reactScanners.react2shellScanner, priority: 1 },

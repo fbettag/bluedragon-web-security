@@ -90,6 +90,7 @@ function cacheElements() {
 
     // Exploit Section
     exploitSection: document.getElementById('exploitSection'),
+    exploitUrl: document.getElementById('exploitUrl'),
     exploitCommand: document.getElementById('exploitCommand'),
     runExploitBtn: document.getElementById('runExploitBtn'),
     exploitOutput: document.getElementById('exploitOutput'),
@@ -535,14 +536,16 @@ function showExploitModal(result) {
   elements.exploitSection.dataset.vulnType = vulnType;
   elements.exploitSection.classList.remove('hidden');
 
+  // Set target URL from result or current tab
+  const targetUrl = result.url || result.endpoint || currentTab?.url || '';
+  elements.exploitUrl.value = targetUrl;
+
   // Set default command
   const defaultCmd = getDefaultCommand(vulnType);
-  if (defaultCmd && !elements.exploitCommand.value) {
-    elements.exploitCommand.value = defaultCmd;
-  }
+  elements.exploitCommand.value = defaultCmd || '';
 
-  // Focus input
-  setTimeout(() => elements.exploitCommand.focus(), 100);
+  // Focus URL input
+  setTimeout(() => elements.exploitUrl.focus(), 100);
 }
 
 /**
@@ -623,6 +626,7 @@ function closeModal() {
 
   // Reset exploit section
   elements.exploitSection.classList.add('hidden');
+  elements.exploitUrl.value = '';
   elements.exploitCommand.value = '';
   elements.exploitOutput.innerHTML = '<div class="exploit-output-placeholder">Output will appear here...</div>';
   elements.exploitStatus.textContent = '';
@@ -672,6 +676,16 @@ function getVulnType(result) {
     return 'langflow-rce';
   } else if (result.cve === 'CVE-2025-34291' || result.name?.includes('Langflow CORS')) {
     return 'langflow-cors-rce';
+  } else if (result.type === 'PATH_TRAVERSAL' || result.name?.includes('Path Traversal')) {
+    return 'path-traversal';
+  } else if (result.type === 'PROTOTYPE_POLLUTION' || result.name?.includes('Prototype Pollution')) {
+    return 'prototype-pollution';
+  } else if (result.cve === 'CVE-2025-59052' || result.name?.includes('Race Condition')) {
+    return 'angular-race-condition';
+  } else if (result.cve === 'CVE-2025-62427' || (result.name?.includes('Angular') && result.name?.includes('SSRF'))) {
+    return 'angular-ssrf';
+  } else if (result.cve === 'CVE-2024-47831' || result.name?.includes('Image Optimization')) {
+    return 'image-dos';
   }
   return null;
 }
@@ -690,6 +704,16 @@ function getDefaultCommand(vulnType) {
       return ''; // No command needed
     case 'langflow-cors-rce':
       return ''; // No command needed
+    case 'path-traversal':
+      return '../../../../etc/passwd'; // Default traversal path
+    case 'prototype-pollution':
+      return ''; // No command needed - uses predefined payloads
+    case 'angular-race-condition':
+      return ''; // No command - uses concurrent requests
+    case 'angular-ssrf':
+      return ''; // No command - uses double-slash injection
+    case 'image-dos':
+      return 'https://httpbin.org/image/png'; // External URL to test
     default:
       return 'echo test';
   }
@@ -717,14 +741,16 @@ function showExploitSection() {
   elements.exploitSection.classList.remove('hidden');
   elements.modalExploitBtn.classList.add('hidden');
 
+  // Set target URL from result or current tab
+  const targetUrl = result.url || result.endpoint || currentTab?.url || '';
+  elements.exploitUrl.value = targetUrl;
+
   // Set default command
   const defaultCmd = getDefaultCommand(vulnType);
-  if (defaultCmd && !elements.exploitCommand.value) {
-    elements.exploitCommand.value = defaultCmd;
-  }
+  elements.exploitCommand.value = defaultCmd || '';
 
-  // Focus input
-  elements.exploitCommand.focus();
+  // Focus URL input
+  elements.exploitUrl.focus();
 }
 
 /**
@@ -767,9 +793,15 @@ async function runExploit() {
   const result = scanResults.find(r => r.id === resultId);
   const vulnType = elements.exploitSection.dataset.vulnType;
   const command = elements.exploitCommand.value.trim();
+  const targetUrl = elements.exploitUrl.value.trim();
 
-  if (!result || !vulnType) {
+  if (!vulnType) {
     showToast('No vulnerability selected', 'error');
+    return;
+  }
+
+  if (!targetUrl) {
+    showToast('Please enter a target URL', 'error');
     return;
   }
 
@@ -778,21 +810,30 @@ async function runExploit() {
   elements.runExploitBtn.disabled = true;
   setExploitStatus('Running exploit...', 'running');
 
-  // Add command to output
+  // Add target and command to output
+  addOutputLine(`Target: ${targetUrl}`, 'info');
   if (command) {
-    addOutputLine(command, 'command');
+    addOutputLine(`Payload: ${command}`, 'command');
   } else {
     addOutputLine('Running exploit probe...', 'info');
   }
 
   try {
+    // Parse path from target URL
+    let path = '/';
+    try {
+      path = new URL(targetUrl).pathname;
+    } catch (e) {
+      path = targetUrl.startsWith('/') ? targetUrl : '/' + targetUrl;
+    }
+
     const response = await chrome.tabs.sendMessage(currentTab.id, {
       type: MESSAGE_TYPES.TEST_EXPLOIT,
       vulnType,
       options: {
-        path: result.url ? new URL(result.url).pathname : '/',
+        path,
         command: command || 'echo BlueDragon_Test_$(date +%s)',
-        endpoint: result.url
+        endpoint: targetUrl
       }
     });
 

